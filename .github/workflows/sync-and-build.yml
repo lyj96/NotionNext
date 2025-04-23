@@ -19,6 +19,8 @@ jobs:
     steps:  
       - name: Checkout repository  
         uses: actions/checkout@v4  
+        with:  
+          fetch-depth: 0  # Fetch complete history for comparison  
 
       # Step 1: Sync upstream changes  
       - name: Sync upstream changes  
@@ -36,11 +38,25 @@ jobs:
           echo "[Error] Sync failed, likely due to upstream workflow changes. You need to manually Sync Fork once."  
           exit 1  
 
-      # Step 2: Build and push Docker image  
+      # Step 2: Check for updates from upstream  
+      - name: Check for updates  
+        id: check_updates  
+        run: |  
+          if [[ $(git rev-parse HEAD) != $(git rev-parse @{u}) ]]; then  
+            echo "::set-output name=has_updates::true"  
+            echo "Upstream has changes."  
+          else  
+            echo "::set-output name=has_updates::false"  
+            echo "No changes from upstream."  
+          fi  
+
+      # Step 3: Build and push Docker image (only if there are updates)  
       - name: Set up Docker Buildx  
+        if: steps.check_updates.outputs.has_updates == 'true'  
         uses: docker/setup-buildx-action@v3  
 
       - name: Log into registry ${{ env.REGISTRY }}  
+        if: steps.check_updates.outputs.has_updates == 'true'  
         uses: docker/login-action@v3  
         with:  
           registry: ${{ env.REGISTRY }}  
@@ -48,16 +64,18 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}  
 
       - name: Extract Docker metadata  
+        if: steps.check_updates.outputs.has_updates == 'true'  
         id: meta  
         uses: docker/metadata-action@v5  
         with:  
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}  
 
       - name: Build and push Docker image  
+        if: steps.check_updates.outputs.has_updates == 'true'  
         uses: docker/build-push-action@v5  
         with:  
           context: .  
           platforms: linux/amd64,linux/arm64  
-          push: true # Always push after sync  
+          push: true  # Always push after sync  
           tags: ${{ steps.meta.outputs.tags }}  
           labels: ${{ steps.meta.outputs.labels }}  
